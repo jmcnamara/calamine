@@ -472,8 +472,6 @@ impl<T: CellType> Range<T> {
     /// An example of creating a new calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_new.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// // Create a 8x1 Range.
@@ -507,8 +505,6 @@ impl<T: CellType> Range<T> {
     /// An example of creating a new empty calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_empty.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::empty();
@@ -537,8 +533,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting the start position of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_start.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::new((2, 3), (9, 3));
@@ -567,8 +561,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting the end position of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_end.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::new((2, 3), (9, 3));
@@ -595,8 +587,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting the column width of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_width.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::new((2, 3), (9, 3));
@@ -623,8 +613,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting the row height of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_height.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::new((2, 3), (9, 3));
@@ -648,8 +636,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting the (height, width) size of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_size.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::new((2, 3), (9, 3));
@@ -669,8 +655,6 @@ impl<T: CellType> Range<T> {
     /// An example of checking if a calamine `Range` is empty.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_empty.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range: Range<Data> = Range::empty();
@@ -699,8 +683,6 @@ impl<T: CellType> Range<T> {
     /// Cells.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_from_sparse.rs
-    /// #
     /// use calamine::{Cell, Data, Range};
     ///
     /// let cells = vec![
@@ -777,8 +759,6 @@ impl<T: CellType> Range<T> {
     /// An example of setting a value in a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_set_value.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let mut range = Range::new((0, 0), (5, 2));
@@ -861,8 +841,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting a value in a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_get_value.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let range = Range::new((1, 1), (5, 5));
@@ -904,8 +882,6 @@ impl<T: CellType> Range<T> {
     /// positioning.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_get.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// let mut range = Range::new((1, 1), (5, 5));
@@ -934,8 +910,6 @@ impl<T: CellType> Range<T> {
     /// An example of using a `Row` iterator with a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_rows.rs
-    /// #
     /// use calamine::{Cell, Data, Range};
     ///
     /// let cells = vec![
@@ -955,14 +929,17 @@ impl<T: CellType> Range<T> {
     ///     }
     /// }
     ///
-    /// // Output in relative coordinates:
-    /// //
-    /// // (0, 0): 1
-    /// // (0, 1): 2
-    /// // (1, 0):
-    /// // (1, 1):
-    /// // (2, 0): 3
-    /// // (2, 1):
+    /// ```
+    ///
+    /// Output in relative coordinates:
+    ///
+    /// ```text
+    /// (0, 0): 1
+    /// (0, 1): 2
+    /// (1, 0):
+    /// (1, 1):
+    /// (2, 0): 3
+    /// (2, 1):
     /// ```
     ///
     pub fn rows(&self) -> Rows<'_, T> {
@@ -989,8 +966,6 @@ impl<T: CellType> Range<T> {
     /// An example of iterating over the used cells in a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_used_cells.rs
-    /// #
     /// use calamine::{Cell, Data, Range};
     ///
     /// let cells = vec![
@@ -1006,12 +981,14 @@ impl<T: CellType> Range<T> {
     /// for (row, col, data) in range.used_cells() {
     ///     println!("({row}, {col}): {data}");
     /// }
+    /// ```
     ///
-    /// // Output:
-    /// //
-    /// // (0, 0): 1
-    /// // (0, 1): 2
-    /// // (2, 0): 3
+    /// Output:
+    ///
+    /// ```text
+    /// (0, 0): 1
+    /// (0, 1): 2
+    /// (2, 0): 3
     /// ```
     ///
     pub fn used_cells(&self) -> UsedCells<'_, T> {
@@ -1033,8 +1010,6 @@ impl<T: CellType> Range<T> {
     /// An example of iterating over the used cells in a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_cells.rs
-    /// #
     /// use calamine::{Cell, Data, Range};
     ///
     /// let cells = vec![
@@ -1050,15 +1025,17 @@ impl<T: CellType> Range<T> {
     /// for (row, col, data) in range.cells() {
     ///     println!("({row}, {col}): {data}");
     /// }
+    /// ```
     ///
-    /// // Output:
-    /// //
-    /// // (0, 0): 1
-    /// // (0, 1): 2
-    /// // (1, 0):
-    /// // (1, 1):
-    /// // (2, 0): 3
-    /// // (2, 1):
+    /// Output:
+    ///
+    /// ```text
+    /// (0, 0): 1
+    /// (0, 1): 2
+    /// (1, 0):
+    /// (1, 1):
+    /// (2, 0): 3
+    /// (2, 1):
     /// ```
     ///
     pub fn cells(&self) -> Cells<'_, T> {
@@ -1101,12 +1078,10 @@ impl<T: CellType> Range<T> {
     /// ```
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_deserialize.rs
-    /// #
     /// use calamine::{open_workbook, Error, Reader, Xlsx};
     ///
     /// fn main() -> Result<(), Error> {
-    ///     let path = format!("{}/tests/temperature.xlsx", env!("CARGO_MANIFEST_DIR"));
+    ///     let path = "tests/temperature.xlsx";
     ///
     ///     // Open the workbook.
     ///     let mut workbook: Xlsx<_> = open_workbook(path)?;
@@ -1152,8 +1127,6 @@ impl<T: CellType> Range<T> {
     /// An example of getting a sub range of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_range.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// // Create a range with some values.
@@ -1244,8 +1217,6 @@ impl<T: CellType + fmt::Display> Range<T> {
     /// An example of getting the header row of a calamine `Range`.
     ///
     /// ```
-    /// # // This code is available in examples/doc_range_headers.rs
-    /// #
     /// use calamine::{Data, Range};
     ///
     /// // Create a range with some values.
@@ -1281,8 +1252,6 @@ impl<T: CellType + fmt::Display> Range<T> {
 /// An example of row indexing for a calamine `Range`.
 ///
 /// ```
-/// # // This code is available in examples/doc_range_index_row.rs
-/// #
 /// use calamine::{Data, Range};
 ///
 /// // Create a range with a value.
@@ -1308,8 +1277,6 @@ impl<T: CellType> Index<usize> for Range<T> {
 /// An example of cell indexing for a calamine `Range`.
 ///
 /// ```
-/// # // This code is available in examples/doc_range_index_cell.rs
-/// #
 /// use calamine::{Data, Range};
 ///
 /// // Create a range with a value.
@@ -1344,8 +1311,6 @@ impl<T: CellType> IndexMut<usize> for Range<T> {
 /// An example of mutable cell indexing for a calamine `Range`.
 ///
 /// ```
-/// # // This code is available in examples/doc_range_index_mut_cell.rs
-/// #
 /// use calamine::{Data, Range};
 ///
 /// // Create a new empty range.
