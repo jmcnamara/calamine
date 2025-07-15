@@ -69,6 +69,8 @@ mod xlsx;
 
 mod de;
 mod errors;
+
+pub mod changelog;
 pub mod vba;
 
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
