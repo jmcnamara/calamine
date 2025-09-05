@@ -124,8 +124,19 @@ fn issue_9() {
 }
 
 #[test]
-fn vba() {
+fn vba_xlsm() {
     let mut excel: Xlsx<_> = wb("vba.xlsm");
+    let vba = excel.vba_project().unwrap().unwrap();
+    assert_eq!(
+        vba.get_module("testVBA").unwrap(),
+        "Attribute VB_Name = \"testVBA\"\r\nPublic Sub test()\r\n    MsgBox \"Hello from \
+         vba!\"\r\nEnd Sub\r\n"
+    );
+}
+
+#[test]
+fn vba_xls() {
+    let mut excel: Xls<_> = wb("vba.xls");
     let vba = excel.vba_project().unwrap().unwrap();
     assert_eq!(
         vba.get_module("testVBA").unwrap(),
@@ -2847,14 +2858,14 @@ fn test_oom_allocation() {
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].0, "Colsale (Aug".to_string());
 
+    // The cfb crate rejects the malformed FAT up front, reporting it as an
+    // io::Error, so this arrives as XlsError::Io rather than XlsError::Cfb.
     let path = test_path("OOM_alloc3.xls");
-    assert!(
-        matches!(
-            open_workbook::<Xls<_>, _>(path),
-            Err(calamine::XlsError::Cfb(_))
-        ),
-        "Is expected to return XlsError::Cfb error"
-    );
+    match open_workbook::<Xls<_>, _>(path) {
+        Err(calamine::XlsError::Io(e)) if e.to_string().contains("FAT") => {}
+        Err(e) => panic!("Is expected to return a malformed-FAT error: {e}"),
+        Ok(_) => panic!("Is expected to return a malformed-FAT error"),
+    }
 }
 
 // Test for issue #548. The SST table in the test file has an incorrect unique
@@ -3614,12 +3625,11 @@ fn too_small_xls() {
     let path = test_path("too_small.xls");
     let res: Result<Xls<_>, _> = open_workbook(&path);
     match res {
-
-        Err(calamine::XlsError::Cfb(e)) if e.to_string() == "Invalid OLE (68 bytes is too small, signature \\x41\\x74\\x74\\x61\\x63\\x68\\x6d\\x65 invalid, not an office document?)" => {}
-        Err(calamine::XlsError::Cfb(e)) => {
-            panic!("Is expected to return CfbError::Ole(_) error: {e}")
-        }
-        Ok(_) | Err(_) => panic!("Is expected to return CfbError::Ole(_) error"),
+        // The cfb crate surfaces a malformed/undersized container as an
+        // io::Error, so this arrives as XlsError::Io rather than XlsError::Cfb.
+        Err(calamine::XlsError::Io(e)) if e.to_string().contains("too small") => {}
+        Err(e) => panic!("Is expected to return an undersized CFB error: {e}"),
+        Ok(_) => panic!("Is expected to return an undersized CFB error"),
     }
 }
 
