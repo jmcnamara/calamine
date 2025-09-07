@@ -2060,18 +2060,6 @@ fn any_sheets_ods() {
 }
 
 #[test]
-fn issue_102() {
-    let path = test_path("pass_protected.xlsx");
-    assert!(
-        matches!(
-            open_workbook::<Xlsx<_>, _>(path),
-            Err(calamine::XlsxError::Password)
-        ),
-        "Is expected to return XlsxError::Password error"
-    );
-}
-
-#[test]
 fn issue_374() {
     let mut workbook: Xls<_> = wb("biff5_write.xls");
 
@@ -2099,7 +2087,20 @@ fn issue_385() {
 }
 
 #[test]
-fn pass_protected_xlsb() {
+fn password_protected_xlsx() {
+    // Test for Xlsx files with passwords. Issue #102.
+    let path = test_path("pass_protected.xlsx");
+    assert!(
+        matches!(
+            open_workbook::<Xlsx<_>, _>(path),
+            Err(calamine::XlsxError::Password)
+        ),
+        "Is expected to return XlsxError::Password error"
+    );
+}
+
+#[test]
+fn password_protected_xlsb() {
     let path = test_path("pass_protected.xlsb");
     assert!(
         matches!(
@@ -2111,7 +2112,7 @@ fn pass_protected_xlsb() {
 }
 
 #[test]
-fn pass_protected_ods() {
+fn password_protected_ods() {
     let path = test_path("pass_protected.ods");
     assert!(
         matches!(
