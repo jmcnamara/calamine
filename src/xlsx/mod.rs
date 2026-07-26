@@ -39,7 +39,8 @@ use crate::{
     SheetType, SheetVisible, Table,
 };
 pub use cells_reader::{
-    XlsxCellFormula, XlsxCellFormulaMetadataRecord, XlsxCellReader, XlsxFormulaMetadata,
+    RawCellType, XlsxCellData, XlsxCellFormula, XlsxCellFormulaMetadataRecord, XlsxCellReader,
+    XlsxFormulaMetadata,
 };
 
 pub(crate) type XlReader<'a, RS> = XmlReader<BufReader<ZipFile<'a, RS>>>;

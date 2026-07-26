@@ -15,7 +15,7 @@ use crate::{
     formats::{format_excel_f64_ref, CellFormat},
     style::Style,
     utils::unescape_entity_to_buffer,
-    Cell, XlsxError,
+    Cell, CellErrorType, XlsxError,
 };
 
 #[derive(Clone, Debug)]
@@ -167,6 +167,140 @@ struct XlsxCellFormulaMetadataRecordInternal<'a> {
     pos: (u32, u32),
     value: DataRef<'a>,
     formula: Option<FormulaMetadata>,
+}
+
+/// The raw, uninterpreted, type and value of a cell, based on the cell's
+/// `t` type attribute.
+///
+/// Unlike [`Data`](crate::Data) and [`DataRef`](crate::DataRef) values, raw
+/// cell values are not interpreted: shared strings are returned as indices
+/// into the shared string table, and numbers are not converted to dates or
+/// times based on the cell number format.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub enum RawCellType {
+    /// Cell containing a blank/empty value, usually with formatting only.
+    Blank,
+
+    /// Cell containing a number.
+    Number(f64),
+
+    /// Cell containing an index into the shared string table (see
+    /// [`XlsxCellReader::shared_strings`]).
+    SharedString(usize),
+
+    /// Cell containing a boolean.
+    Boolean(bool),
+
+    /// Cell containing a date in ISO 8601 format.
+    IsoDate(String),
+
+    /// Cell containing an error.
+    Error(CellErrorType),
+
+    /// Cell containing an inline string, not in the shared string table.
+    InlineString(String),
+
+    /// Cell containing a string formula result.
+    FormulaResultString(String),
+
+    /// Cell with no explicit type whose value is not a valid number. Some
+    /// producers write untyped string values.
+    UntypedString(String),
+}
+
+/// The raw data of a single cell in an XLSX worksheet.
+///
+/// This is returned by the [`XlsxCellReader::next_cell_data`] method and
+/// exposes all the information stored for a cell: its position, style id,
+/// raw uninterpreted type/value and formula, in a single pass over the
+/// worksheet.
+///
+/// The style id resolves to a full [`Style`] (including the number format)
+/// via [`XlsxCellReader::styles`], and shared string indices resolve via
+/// [`XlsxCellReader::shared_strings`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct XlsxCellData {
+    // The position of the cell (row, column).
+    position: (u32, u32),
+
+    // The style id of the cell.
+    style_id: usize,
+
+    // The raw, uninterpreted, type of the cell.
+    raw_type: RawCellType,
+
+    // The cell formula, if any.
+    formula: Option<XlsxFormulaMetadata>,
+}
+
+impl XlsxCellData {
+    /// Get the zero-based `(row, column)` position of the cell.
+    pub fn position(&self) -> (u32, u32) {
+        self.position
+    }
+
+    /// Get the style id of the cell.
+    ///
+    /// The id is an index into the workbook style palette (see
+    /// [`XlsxCellReader::styles`]), which can be used to look up the cell
+    /// number format or the entire cell style. Id 0 is the default format.
+    pub fn style_id(&self) -> usize {
+        self.style_id
+    }
+
+    /// Get the raw, uninterpreted, type and value of the cell.
+    pub fn raw_type(&self) -> &RawCellType {
+        &self.raw_type
+    }
+
+    /// Get the cell formula metadata, if the cell contains a formula.
+    ///
+    /// The formula result is stored as the value of the cell, see
+    /// [`XlsxCellData::raw_type`].
+    pub fn formula(&self) -> Option<&XlsxFormulaMetadata> {
+        self.formula.as_ref()
+    }
+}
+
+// Convert the text of a `<v>` element into a `RawCellType` based on the
+// cell's `t` type attribute. Returns `None` for types whose value is stored
+// in a different element (inline strings).
+fn raw_cell_value(type_attr: Option<&[u8]>, v: &str) -> Result<Option<RawCellType>, XlsxError> {
+    let raw = match type_attr {
+        Some(b"s") => {
+            if v.is_empty() {
+                return Ok(Some(RawCellType::Blank));
+            }
+            let idx = atoi_simd::parse::<usize, true, false>(v.as_bytes()).unwrap_or(0);
+            RawCellType::SharedString(idx)
+        }
+        Some(b"b") => RawCellType::Boolean(v != "0"),
+        Some(b"d") => RawCellType::IsoDate(v.to_string()),
+        Some(b"e") => RawCellType::Error(v.parse()?),
+        Some(b"str") => RawCellType::FormulaResultString(v.to_string()),
+        Some(b"inlineStr") | Some(b"is") => return Ok(None),
+        Some(b"n") | None => {
+            if v.is_empty() {
+                return Ok(Some(RawCellType::Blank));
+            }
+            match fast_float2::parse::<f64, _>(v) {
+                Ok(number) => RawCellType::Number(number),
+                // No explicit type: fall back to a string if the value is
+                // not a valid float.
+                Err(_) if type_attr.is_none() => RawCellType::UntypedString(v.to_string()),
+                Err(_) => {
+                    return Err(XlsxError::ParseFloat(v.parse::<f64>().unwrap_err()));
+                }
+            }
+        }
+        Some(t) => {
+            let t = std::str::from_utf8(t).unwrap_or("<utf8 error>").to_string();
+            return Err(XlsxError::CellTAttribute(t));
+        }
+    };
+
+    Ok(Some(raw))
 }
 
 /// An xlsx Cell Iterator.
@@ -387,6 +521,130 @@ where
                     }
                     self.col_index += 1;
                     return Ok(Some((Cell::new(pos, value), style_id)));
+                }
+
+                Ok(Event::End(e)) if e.local_name().as_ref() == b"sheetData" => {
+                    return Ok(None);
+                }
+
+                Ok(Event::Eof) => return Err(XlsxError::XmlEof("sheetData")),
+
+                Err(e) => return Err(XlsxError::Xml(e)),
+
+                _ => (),
+            }
+        }
+    }
+
+    /// Return the raw data of the next cell in XML stream order.
+    ///
+    /// This returns all the information stored for a cell as an
+    /// [`XlsxCellData`] record: the position, style id, raw uninterpreted
+    /// type/value and formula, in a single pass over the worksheet. Unlike
+    /// [`XlsxCellReader::next_cell`] the value is not interpreted: shared
+    /// strings are returned as indices into the shared string table (see
+    /// [`XlsxCellReader::shared_strings`]) and numbers are not converted to
+    /// dates or times based on the cell number format.
+    pub fn next_cell_data(&mut self) -> Result<Option<XlsxCellData>, XlsxError> {
+        loop {
+            self.buf.clear();
+            match self.xml.read_event_into(&mut self.buf) {
+                Ok(Event::Start(row_element)) if row_element.local_name().as_ref() == b"row" => {
+                    if let Some(r) = row_element.raw_attr(b"r")? {
+                        self.row_index = get_row(r)?;
+                    }
+                }
+
+                Ok(Event::End(row_element)) if row_element.local_name().as_ref() == b"row" => {
+                    self.row_index += 1;
+                    self.col_index = 0;
+                }
+
+                Ok(Event::Start(c_element)) if c_element.local_name().as_ref() == b"c" => {
+                    let (pos_attr, style_attr, type_attr) =
+                        get_attrs!(c_element, b"r" => r, b"s" => s, b"t" => t)?;
+
+                    let pos = if let Some(range) = pos_attr {
+                        let (row, col) = get_row_column(range)?;
+                        self.col_index = col;
+                        (row, col)
+                    } else {
+                        (self.row_index, self.col_index)
+                    };
+
+                    let style_id = style_attr
+                        .and_then(|s| atoi_simd::parse::<usize, true, false>(s).ok())
+                        .unwrap_or(0);
+                    let mut raw_type: Option<RawCellType> = None;
+                    let mut formula: Option<FormulaMetadata> = None;
+
+                    loop {
+                        self.cell_buf.clear();
+                        match self.xml.read_event_into(&mut self.cell_buf) {
+                            Ok(Event::Start(e)) if e.local_name().as_ref() == b"f" => {
+                                formula = Self::read_formula_record(
+                                    &mut self.xml,
+                                    &mut self.formulas,
+                                    &e,
+                                    pos,
+                                    false,
+                                )?;
+                            }
+
+                            Ok(Event::Start(e)) if e.local_name().as_ref() == b"is" => {
+                                let string = read_string_with_bufs(
+                                    &mut self.xml,
+                                    e.name(),
+                                    &mut self.value_bufs.xml,
+                                    &mut self.value_bufs.str_inner,
+                                )?;
+                                raw_type =
+                                    Some(RawCellType::InlineString(string.unwrap_or_default()));
+                            }
+
+                            Ok(Event::Start(e)) if e.local_name().as_ref() == b"v" => {
+                                // Collect the <v> element text content.
+                                self.value_bufs.value.clear();
+                                loop {
+                                    self.value_bufs.xml.clear();
+                                    match self.xml.read_event_into(&mut self.value_bufs.xml)? {
+                                        Event::Text(t) => {
+                                            self.value_bufs.value.push_str(&t.xml10_content()?)
+                                        }
+                                        Event::GeneralRef(g) => unescape_entity_to_buffer(
+                                            &g,
+                                            &mut self.value_bufs.value,
+                                        )?,
+                                        Event::End(end) if end.local_name().as_ref() == b"v" => {
+                                            break
+                                        }
+                                        Event::Eof => return Err(XlsxError::XmlEof("v")),
+                                        _ => (),
+                                    }
+                                }
+
+                                if raw_type.is_none() {
+                                    raw_type = raw_cell_value(type_attr, &self.value_bufs.value)?;
+                                }
+                            }
+
+                            Ok(Event::End(e)) if e.local_name().as_ref() == b"c" => break,
+
+                            Ok(Event::Eof) => return Err(XlsxError::XmlEof("c")),
+
+                            Err(e) => return Err(XlsxError::Xml(e)),
+
+                            _ => (),
+                        }
+                    }
+                    self.col_index += 1;
+
+                    return Ok(Some(XlsxCellData {
+                        position: pos,
+                        style_id,
+                        raw_type: raw_type.unwrap_or(RawCellType::Blank),
+                        formula: formula.map(FormulaMetadata::into_metadata),
+                    }));
                 }
 
                 Ok(Event::End(e)) if e.local_name().as_ref() == b"sheetData" => {
@@ -698,6 +956,11 @@ where
     /// Return the workbook style palette, indexed by style id.
     pub fn styles(&self) -> &[Style] {
         self.styles
+    }
+
+    /// Return the workbook shared string table, indexed by shared string id.
+    pub fn shared_strings(&self) -> &[String] {
+        self.strings
     }
 }
 

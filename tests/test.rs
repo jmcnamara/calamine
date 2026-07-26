@@ -6,9 +6,9 @@ use calamine::vba::Reference;
 use calamine::Data::{Bool, DateTime, DateTimeIso, DurationIso, Empty, Error, Float, Int, String};
 use calamine::{
     open_workbook, open_workbook_auto, BorderStyle, Color, DataRef, DataType, Dimensions,
-    ExcelDateTime, ExcelDateTimeType, HeaderRow, HorizontalAlignment, Ods, Range, Reader,
-    ReaderRef, Sheet, SheetType, SheetVisible, TextRotation, UnderlineStyle, VerticalAlignment,
-    Xls, Xlsb, Xlsx, XlsxFormulaMetadata,
+    ExcelDateTime, ExcelDateTimeType, HeaderRow, HorizontalAlignment, Ods, Range, RawCellType,
+    Reader, ReaderRef, Sheet, SheetType, SheetVisible, TextRotation, UnderlineStyle,
+    VerticalAlignment, Xls, Xlsb, Xlsx, XlsxFormulaMetadata,
 };
 use calamine::{CellErrorType::*, Data};
 use rstest::rstest;
@@ -4138,4 +4138,90 @@ fn test_next_cell_with_style_id() {
     for (pos, value, _, _) in &cells {
         assert_eq!(range.get_value((pos.0, pos.1)).unwrap(), value);
     }
+}
+
+#[test]
+fn test_next_cell_data() {
+    let mut xlsx: Xlsx<_> = wb("styles.xlsx");
+    let mut reader = xlsx.worksheet_cells_reader("Sheet 1").unwrap();
+
+    let mut records = Vec::new();
+    while let Some(cell_data) = reader.next_cell_data().unwrap() {
+        records.push(cell_data);
+    }
+    assert_eq!(records.len(), 14);
+
+    // A1 is a shared string resolving to "Bold", explicitly styled, with no
+    // formula.
+    let a1 = &records[0];
+    assert_eq!(a1.position(), (0, 0));
+    assert!(a1.style_id() > 0);
+    assert!(a1.formula().is_none());
+    match *a1.raw_type() {
+        RawCellType::SharedString(index) => {
+            assert_eq!(reader.shared_strings()[index], "Bold");
+        }
+        ref raw_type => panic!("expected a shared string, got {raw_type:?}"),
+    }
+
+    // A10 is a raw number with a "#,##0" number format via the style id.
+    let a10 = &records[9];
+    assert_eq!(*a10.raw_type(), RawCellType::Number(1_000_000.0));
+    let number_format = reader.styles()[a10.style_id()]
+        .number_format
+        .as_ref()
+        .unwrap();
+    assert_eq!(number_format.format_code, "#,##0");
+
+    // A14 is a datetime, returned as an uninterpreted serial number.
+    assert_eq!(
+        *records[13].raw_type(),
+        RawCellType::Number(45859.54827546296)
+    );
+}
+
+#[test]
+fn test_next_cell_data_iso_date() {
+    // Cells with the t="d" type are returned as raw ISO 8601 date strings.
+    let mut xlsx: Xlsx<_> = wb("date_iso.xlsx");
+    let sheet_name = xlsx.sheet_names()[0].clone();
+    let mut reader = xlsx.worksheet_cells_reader(&sheet_name).unwrap();
+
+    let cell_data = reader.next_cell_data().unwrap().unwrap();
+    assert_eq!(cell_data.position(), (0, 0));
+    assert_eq!(
+        *cell_data.raw_type(),
+        RawCellType::IsoDate("2021-01-01".to_string())
+    );
+}
+
+#[test]
+fn test_next_cell_data_formulas() {
+    let mut xlsx: Xlsx<_> = wb("formula.issue.xlsx");
+    let mut reader = xlsx.worksheet_cells_reader("Sheet1").unwrap();
+
+    let mut records = Vec::new();
+    while let Some(cell_data) = reader.next_cell_data().unwrap() {
+        records.push(cell_data);
+    }
+
+    // A1 contains the formula "C1+E5" with the cached numeric result 23.
+    let a1 = &records[0];
+    assert_eq!(a1.position(), (0, 0));
+    assert_eq!(*a1.raw_type(), RawCellType::Number(23.0));
+    match a1.formula() {
+        Some(XlsxFormulaMetadata::Normal { formula }) => assert_eq!(formula, "C1+E5"),
+        formula => panic!("expected a normal formula, got {formula:?}"),
+    }
+
+    // J14 contains a formula with a cached string result.
+    let j14 = records
+        .iter()
+        .find(|cell_data| cell_data.position() == (13, 9))
+        .unwrap();
+    assert_eq!(
+        *j14.raw_type(),
+        RawCellType::FormulaResultString("US".to_string())
+    );
+    assert!(j14.formula().is_some());
 }
