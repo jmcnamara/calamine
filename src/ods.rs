@@ -35,7 +35,10 @@ const MAX_ROWS: u32 = 1_048_576;
 const MAX_COLUMNS: u32 = 16_384;
 
 /// Maximum number of cells to prevent memory exhaustion from malicious files.
-const MAX_CELLS: usize = 100_000_000;
+///
+/// Shared with the other readers, which enforce the same limit via
+/// [`Range::try_from_sparse()`].
+const MAX_CELLS: usize = crate::MAX_RANGE_CELLS;
 
 type OdsReader<'a, RS> = XmlReader<BufReader<ZipFile<'a, RS>>>;
 

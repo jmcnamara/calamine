@@ -686,6 +686,35 @@ pub struct Range<T> {
     inner: Vec<T>,
 }
 
+/// The maximum number of cells in the bounding box of a [`Range`].
+///
+/// All elements of a [`Range`] are allocated even for spare ranges. As such it
+/// is possible to exhaust memory by creating a range with a very large bounding
+/// box. This limit is use to prevent that from happening.
+pub const MAX_RANGE_CELLS: usize = 100_000_000;
+
+/// The bounding box of a [`Range`] exceeded [`MAX_RANGE_CELLS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellLimitExceeded {
+    /// Number of cells in the requested bounding box.
+    pub requested: usize,
+
+    /// Maximum allowed number of cells.
+    pub max: usize,
+}
+
+impl fmt::Display for CellLimitExceeded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let CellLimitExceeded { requested, max } = self;
+        write!(
+            f,
+            "Cell limit exceeded ({requested} cells requested, max {max})"
+        )
+    }
+}
+
+impl std::error::Error for CellLimitExceeded {}
+
 impl<T: CellType> Range<T> {
     /// Creates a new `Range` with default values.
     ///
@@ -913,6 +942,12 @@ impl<T: CellType> Range<T> {
     /// from a vector of [`Cell`] data. This is slightly more efficient than
     /// creating a range with [`Range::new()`] and then setting the values.
     ///
+    /// A `Range` is dense, so the allocation is driven by the area of the
+    /// bounding box of `cells`, not by how many cells there are. For cells
+    /// derived from an untrusted file, use [`Range::try_from_sparse()`], which
+    /// rejects a bounding box larger than [`MAX_RANGE_CELLS`] rather than
+    /// attempting the allocation.
+    ///
     /// # Parameters
     ///
     /// - `cells`: A vector of [`Cell`] elements.
@@ -940,11 +975,80 @@ impl<T: CellType> Range<T> {
     /// ```
     ///
     pub fn from_sparse(cells: Vec<Cell<T>>) -> Range<T> {
-        if cells.is_empty() {
+        let Some((start, end)) = Self::sparse_bounds(&cells) else {
             return Range::empty();
+        };
+        Self::fill_sparse(cells, start, end)
+    }
+
+    /// Creates a `Range` from a sparse vector of `Cell`s, refusing oversized
+    /// bounding boxes.
+    ///
+    /// This is the fallible counterpart of [`Range::from_sparse()`]. A `Range`
+    /// is dense, so its cost is driven by the area of the bounding box of
+    /// `cells` rather than by how many cells there are: two cells in opposite
+    /// corners of the Excel grid describe a bounding box of over 17 billion
+    /// cells. This constructor returns [`CellLimitExceeded`] instead of
+    /// attempting an allocation that large.
+    ///
+    /// Prefer this constructor when the cells come from an untrusted file. All
+    /// of calamine's own readers use it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CellLimitExceeded`] if the bounding box of `cells` covers more
+    /// than [`MAX_RANGE_CELLS`] cells.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use calamine::{Cell, Data, Range};
+    ///
+    /// let cells = vec![
+    ///     Cell::new((0, 0), Data::Int(1)),
+    ///     Cell::new((2, 1), Data::Int(1)),
+    /// ];
+    ///
+    /// let range = Range::try_from_sparse(cells).unwrap();
+    ///
+    /// assert_eq!(range.width(), 2);
+    /// assert_eq!(range.height(), 3);
+    /// ```
+    ///
+    /// A bounding box larger than [`MAX_RANGE_CELLS`] is rejected, however few
+    /// cells it actually contains:
+    ///
+    /// ```
+    /// use calamine::{Cell, Data, Range};
+    ///
+    /// let cells = vec![
+    ///     Cell::new((0, 0), Data::Int(1)),
+    ///     Cell::new((1_048_575, 16_383), Data::Int(1)),
+    /// ];
+    ///
+    /// assert!(Range::try_from_sparse(cells).is_err());
+    /// ```
+    ///
+    pub fn try_from_sparse(cells: Vec<Cell<T>>) -> Result<Range<T>, CellLimitExceeded> {
+        let Some((start, end)) = Self::sparse_bounds(&cells) else {
+            return Ok(Range::empty());
+        };
+        let len = Self::dense_len(start, end);
+        if len > MAX_RANGE_CELLS {
+            return Err(CellLimitExceeded {
+                requested: len,
+                max: MAX_RANGE_CELLS,
+            });
         }
-        // cells do not always appear in (row, col) order
-        // search bounds
+        Ok(Self::fill_sparse(cells, start, end))
+    }
+
+    /// Bounding box `(start, end)` of a sparse vector of cells, or `None` if it
+    /// is empty. Cells do not always appear in `(row, col)` order.
+    fn sparse_bounds(cells: &[Cell<T>]) -> Option<((u32, u32), (u32, u32))> {
+        if cells.is_empty() {
+            return None;
+        }
         let mut row_start = u32::MAX;
         let mut row_end = 0;
         let mut col_start = u32::MAX;
@@ -955,22 +1059,34 @@ impl<T: CellType> Range<T> {
             col_start = min(c, col_start);
             col_end = max(c, col_end);
         }
-        let cols = (col_end - col_start + 1) as usize;
-        let rows = (row_end - row_start + 1) as usize;
-        let len = cols.saturating_mul(rows);
-        let mut v = vec![T::default(); len];
+        Some(((row_start, col_start), (row_end, col_end)))
+    }
+
+    /// Number of cells covered by the bounding box `(start, end)`, saturating
+    /// rather than overflowing so that the caller can reject the result.
+    fn dense_len(start: (u32, u32), end: (u32, u32)) -> usize {
+        let cols = (end.1 - start.1 + 1) as usize;
+        let rows = (end.0 - start.0 + 1) as usize;
+        cols.saturating_mul(rows)
+    }
+
+    /// Builds the dense `Range` covering `(start, end)` from a sparse vector of
+    /// cells. `start`/`end` must be the bounding box of `cells`.
+    fn fill_sparse(cells: Vec<Cell<T>>, start: (u32, u32), end: (u32, u32)) -> Range<T> {
+        let cols = (end.1 - start.1 + 1) as usize;
+        let mut v = vec![T::default(); Self::dense_len(start, end)];
         v.shrink_to_fit();
         for c in cells {
-            let row = (c.pos.0 - row_start) as usize;
-            let col = (c.pos.1 - col_start) as usize;
+            let row = (c.pos.0 - start.0) as usize;
+            let col = (c.pos.1 - start.1) as usize;
             let idx = row.saturating_mul(cols) + col;
             if let Some(v) = v.get_mut(idx) {
                 *v = c.val;
             }
         }
         Range {
-            start: (row_start, col_start),
-            end: (row_end, col_end),
+            start,
+            end,
             inner: v,
         }
     }
@@ -2391,4 +2507,60 @@ where
 {
     let data = Data::deserialize(deserializer)?;
     Ok(data.as_datetime().ok_or_else(|| data.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that a bounding box at the limit is accepted but that one cell
+    /// beyond it is not.
+    #[test]
+    fn try_from_sparse_enforces_the_cell_limit() {
+        // 10_000 x 10_000 == MAX_RANGE_CELLS exactly.
+        let at_limit = vec![
+            Cell::new((0, 0), Data::Int(1)),
+            Cell::new((9_999, 9_999), Data::Int(2)),
+        ];
+        let range = Range::try_from_sparse(at_limit).expect("at the limit");
+        assert_eq!(range.get_size(), (10_000, 10_000));
+
+        let over_limit = vec![
+            Cell::new((0, 0), Data::Int(1)),
+            Cell::new((10_000, 9_999), Data::Int(2)),
+        ];
+        let err = Range::try_from_sparse(over_limit).expect_err("over the limit");
+        assert_eq!(err.max, MAX_RANGE_CELLS);
+        assert_eq!(err.requested, 10_001 * 10_000);
+    }
+
+    /// The limit is on the area of the bounding box, not the number of cells:
+    /// two cells in opposite corners of the Excel grid are rejected.
+    #[test]
+    fn try_from_sparse_rejects_a_sparse_bounding_box() {
+        let cells = vec![
+            Cell::new((0, 0), Data::Int(1)),
+            Cell::new((1_048_575, 16_383), Data::Int(2)),
+        ];
+        assert!(Range::try_from_sparse(cells).is_err());
+    }
+
+    /// `try_from_sparse` should agree with `from_sparse` below the limit,
+    /// including for out of order cells and the empty case.
+    #[test]
+    fn try_from_sparse_matches_from_sparse() {
+        for cells in [
+            vec![],
+            vec![Cell::new((3, 4), Data::Int(1))],
+            vec![
+                Cell::new((9, 2), Data::Int(3)),
+                Cell::new((5, 7), Data::Int(1)),
+                Cell::new((6, 1), Data::Int(2)),
+            ],
+        ] {
+            let expected = Range::from_sparse(cells.clone());
+            let actual = Range::try_from_sparse(cells).expect("below the limit");
+            assert_eq!(actual, expected);
+        }
+    }
 }

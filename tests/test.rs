@@ -3616,3 +3616,22 @@ fn xls_empty_string() {
     let range = wb.worksheet_range("Sheet1").unwrap();
     assert_eq!(range.get_value((0, 0)), Some(&String("".to_string())));
 }
+
+// A worksheet whose bounding box exceeds `MAX_RANGE_CELLS` is rejected instead
+// of allocating the dense grid. The fixture is a 1.5KB file holding just two
+// cells, at A1 and XFD1048576, which spans the whole Excel grid (~17 billion
+// cells). Reading it used to try to allocate 512GiB.
+#[test]
+fn xlsx_cell_limit_exceeded() {
+    let path = test_path("cell-limit.xlsx");
+    let mut wb: Xlsx<_> = open_workbook(&path).expect(&path);
+
+    match wb.worksheet_range("Sheet1") {
+        Err(calamine::XlsxError::CellLimitExceeded(e)) => {
+            assert_eq!(e.max, calamine::MAX_RANGE_CELLS);
+            assert!(e.requested > e.max, "requested {} cells", e.requested);
+        }
+        Err(e) => panic!("expected CellLimitExceeded, got {e}"),
+        Ok(_) => panic!("expected CellLimitExceeded, got a range"),
+    }
+}
